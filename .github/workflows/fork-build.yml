@@ -1,0 +1,19 @@
+name: Build
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attacker-controlled build output
+        run: |
+          mkdir -p dist
+          echo "MARKER_PWNED_BY_FORK_PR_RUN" > dist/MARKER.txt
+      - name: Upload artifact as the deploy pipeline expects
+        uses: actions/upload-artifact@v4
+        with:
+          name: website-build-${{ github.run_id }}
+          path: dist
